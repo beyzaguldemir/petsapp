@@ -71,7 +71,7 @@ c:\petsapp\petsapp-1.0.0.apk
 
 ## 🎬 Demo Video
 
-📺 YouTube: *[Buraya demo video linki eklenecek]*
+📺 YouTube: *[https://youtube.com/shorts/NiR4r8DCYWI]*
 
 ---
 
@@ -80,7 +80,7 @@ c:\petsapp\petsapp-1.0.0.apk
 Bu proje eğitim amaçlı geliştirilmiştir.
 
 - **Geliştirici:** Beyza Gül Demir
-- **Danışman:** Nurettin Hoca
+- **Danışman:** Nurettin Şenyer
 - **Platform:** Android (React Native / Expo)
 
 

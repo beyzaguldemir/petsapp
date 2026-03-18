@@ -8,15 +8,13 @@ import { usePet } from '../context/PetContext';
 // ── Physics & layout constants ────────────────────────────────────
 const PET_SIZE    = 48;
 const PET_HALF    = PET_SIZE / 2;
-const PLAT_W      = 96;     // wider platforms → easier to land on
 const PLAT_H      = 14;
 const COIN_SIZE   = 22;
 const COIN_HALF   = COIN_SIZE / 2;
 const JUMP_VEL    = 19;     // world-units/frame upward velocity on jump
 const GRAVITY     = 0.60;   // world-units/frame² downward acceleration
 const MAX_FALL    = 19;     // cap on fall speed
-const GAP_MIN     = 36;     // min vertical gap between platforms
-const GAP_MAX     = 54;     // max vertical gap
+// GAP and PLAT_W are now computed dynamically from screen size (see generatePlatforms)
 const COIN_CHANCE = 0.36;   // probability a platform spawns a coin above it
 const CAM_RATIO   = 0.58;   // pet stays at (1-CAM_RATIO)×screenH from top while rising
 const ACCEL       = 0.7;    // horizontal acceleration per frame while key/btn held
@@ -173,16 +171,23 @@ export default function GameJumpScreen({ navigation }) {
     const g = G.current;
     const W = areaW.current || 300;
     const H = areaH.current || 600;
-    const buffer = H * 2.2;
+    const buffer = H * 2.5;
+
+    // Responsive platform width: ~28% of screen width, clamped between 72–120px
+    const platW  = Math.max(72, Math.min(120, W * 0.28));
+    // Responsive gap: 15%–22% of screen height → clear visible space between platforms
+    const gapMin = H * 0.15;
+    const gapMax = H * 0.22;
+
     while (g.highestPlatY < g.cameraY + buffer) {
-      const gap = GAP_MIN + Math.random() * (GAP_MAX - GAP_MIN);
+      const gap = gapMin + Math.random() * (gapMax - gapMin);
       g.highestPlatY += gap;
-      const x = 8 + Math.random() * (W - PLAT_W - 16);
-      g.platforms.push({ id: g.nextPlatId++, x, worldY: g.highestPlatY });
+      const x = 8 + Math.random() * (W - platW - 16);
+      g.platforms.push({ id: g.nextPlatId++, x, worldY: g.highestPlatY, platW });
       if (Math.random() < COIN_CHANCE) {
         g.coins.push({
           id: g.nextCoinId++,
-          x:      x + PLAT_W / 2,               // center X
+          x:      x + platW / 2,                // center X
           worldY: g.highestPlatY + PLAT_H + COIN_HALF + 10, // center Y
           collected: false,
         });
@@ -210,8 +215,9 @@ export default function GameJumpScreen({ navigation }) {
     g.nextPlatId = 0;
     g.nextCoinId = 0;
     g.alive      = true;
-    // Spawn starter platform directly under pet
-    g.platforms.push({ id: g.nextPlatId++, x: W / 2 - PLAT_W / 2, worldY: 68 });
+    // Spawn starter platform directly under pet (responsive width)
+    const startPlatW = Math.max(72, Math.min(120, W * 0.28));
+    g.platforms.push({ id: g.nextPlatId++, x: W / 2 - startPlatW / 2, worldY: 68, platW: startPlatW });
     g.highestPlatY = 68;
     generatePlatforms();
   }
@@ -248,7 +254,7 @@ export default function GameJumpScreen({ navigation }) {
         if (prevY >= plat.worldY && g.petWorldY <= plat.worldY) {
           const pL = g.petX - PET_HALF + 8;   // narrow hitbox for fairness
           const pR = g.petX + PET_HALF - 8;
-          if (pR > plat.x && pL < plat.x + PLAT_W) {
+          if (pR > plat.x && pL < plat.x + (plat.platW || 96)) {
             g.petWorldY  = plat.worldY;
             g.petVY      = JUMP_VEL;
             g.mouthOpen  = true;
@@ -391,7 +397,7 @@ export default function GameJumpScreen({ navigation }) {
                 style={[styles.platform, {
                   left:   p.x,
                   bottom: p.worldY - cam - PLAT_H,
-                  width:  PLAT_W,
+                  width:  p.platW || 96,
                 }]}
               >
                 {/* Grass tufts */}

@@ -11,17 +11,24 @@ const COINS_PER_CATCH = 2;
 const PET_SIZE        = 72;
 const PET_HALF        = PET_SIZE / 2;
 const FOOD_SIZE       = 44;
-const FOOD_HALF       = FOOD_SIZE / 2;
-const PET_BOTTOM_PAD  = 22;   // game area bottom → pet anchor bottom
-const GROUND_H        = 28;   // visual grass strip height
-// Mouth Y = areaHeight - PET_BOTTOM_PAD - MOUTH_FROM_BOT
-// Derived from: pet top ≈ areaH - 100, mouth at ~51px from pet top → areaH - 49
-// MOUTH_FROM_BOT = 49 - PET_BOTTOM_PAD = 49 - 22 = 27, using 30 for generosity
-const MOUTH_FROM_BOT  = 30;
-const MOUTH_HW        = 34;   // horizontal hitbox half-width
-const MOUTH_HH        = 30;   // vertical hitbox half-height
-const FALL_BASE_MS    = 2200; // starting fall duration
-const FALL_MIN_MS     = 900;  // fastest fall
+const GROUND_H        = 28;
+const LOOP_MS         = 16;   // ~60 fps game loop
+const FALL_BASE_MS    = 2200;
+const FALL_MIN_MS     = 900;
+
+// Mouth hitbox — derived from actual layout:
+//   petAnchor.bottom = GROUND_H - 4 = 24 (from area bottom)
+//   GamePet flow height = PET_SIZE(72) + shadow(12) = 84
+//   head top = areaH - 24 - 84 = areaH - 108
+//   mouth center inside head = paddingTop(12)+eyes(18)+nose(13)+halfMouth(9) = 52
+//   → petMouthY = areaH - 108 + 52 = areaH - 56
+const MOUTH_Y_OFFSET  = 56;   // areaH - MOUTH_Y_OFFSET = petMouthY
+const MOUTH_HW        = 38;   // horizontal half-width  (actual ~15, +23 tolerance)
+const MOUTH_HH        = 30;   // vertical half-height   (actual ~9,  +21 tolerance)
+
+// Set to true to draw red/blue hitbox borders for visual alignment check
+const DEBUG_HITBOX    = false;
+
 const FOODS = ['🍎', '🍌', '🍓', '🍊', '🍇', '🥕', '🌽', '🍉', '🥝', '🫐'];
 
 // ── Mini pet component ────────────────────────────────────────────
@@ -32,27 +39,19 @@ function GamePet({ mouthOpen, palette }) {
 
   return (
     <View style={{ width: PET_SIZE, alignItems: 'center' }}>
-      {/* Ears */}
       <View style={[petS.ear, { left: 5, backgroundColor: earColor }]} />
       <View style={[petS.ear, { right: 5, backgroundColor: earColor }]} />
-
-      {/* Head */}
       <View style={[petS.head, { backgroundColor: headColor, shadowColor: shadowClr }]}>
-        {/* Eyes */}
         <View style={petS.eyesRow}>
           <View style={petS.eye}><View style={petS.pupil} /></View>
           <View style={petS.eye}><View style={petS.pupil} /></View>
         </View>
-        {/* Nose */}
         <View style={petS.nose} />
-        {/* Mouth */}
         {mouthOpen
           ? <View style={petS.mouthOpen} />
           : <View style={petS.mouthClosed} />
         }
       </View>
-
-      {/* Ground shadow */}
       <View style={petS.groundShadow} />
     </View>
   );
@@ -96,31 +95,34 @@ export default function GameCatchScreen({ navigation }) {
   const [foodActive, setFoodActive] = useState(false);
   const [foodX,      setFoodX]      = useState(0);
   const [foodEmoji,  setFoodEmoji]  = useState('🍎');
+  // Used only when DEBUG_HITBOX=true to force re-renders showing live hitboxes
+  const [debugFrame, setDebugFrame] = useState(0);
 
   // ── Refs ─────────────────────────────────────────────────────────
-  const petXRef        = useRef(150);           // pet center X (pixels)
-  const petXAnim       = useRef(new Animated.Value(0)).current;  // left edge
-  const foodYAnim      = useRef(new Animated.Value(-FOOD_SIZE)).current;
-  const foodXRef       = useRef(0);             // food left edge (static per spawn)
-  const foodYValRef    = useRef(-FOOD_SIZE);    // mirrored from addListener
-  const foodAnimRef    = useRef(null);
-  const foodCaughtRef  = useRef(false);
-  const areaWidthRef   = useRef(0);
-  const areaHeightRef  = useRef(0);
-  const scoreRef       = useRef(0);
-  const coinsAdded     = useRef(false);
-  const gameActive     = useRef(false);
-  const dragStart      = useRef({ petX: 0, touchX: 0 });
+  const petXRef       = useRef(150);   // pet center X, relative to game area
+  const petXAnim      = useRef(new Animated.Value(0)).current;  // left edge
 
-  // ── Food Y listener → collision detection ────────────────────────
+  // Food position — driven by JS game loop, not Animated.timing
+  const foodYRef      = useRef(-FOOD_SIZE);  // food top edge, relative to game area
+  const foodXRef      = useRef(0);           // food left edge (set on spawn)
+  const foodYAnim     = useRef(new Animated.Value(-FOOD_SIZE)).current;
+
+  const foodSpeedRef  = useRef(0);     // pixels per LOOP_MS tick
+  const foodFalling   = useRef(false); // true while food is in flight
+
+  const gameLoopRef   = useRef(null);  // setInterval id for food movement
+  const foodCaughtRef = useRef(false);
+  const areaWidthRef  = useRef(0);
+  const areaHeightRef = useRef(0);
+  const scoreRef      = useRef(0);
+  const coinsAdded    = useRef(false);
+  const gameActive    = useRef(false);
+
+  // Cleanup on unmount
   useEffect(() => {
-    const listenerId = foodYAnim.addListener(({ value }) => {
-      foodYValRef.current = value;
-      if (!foodCaughtRef.current && gameActive.current) {
-        checkCollision(value);
-      }
-    });
-    return () => foodYAnim.removeListener(listenerId);
+    return () => {
+      stopGameLoop();
+    };
   }, []);
 
   // ── Game timer ───────────────────────────────────────────────────
@@ -131,7 +133,7 @@ export default function GameCatchScreen({ navigation }) {
         if (prev <= 1) {
           clearInterval(tid);
           gameActive.current = false;
-          if (foodAnimRef.current) foodAnimRef.current.stop();
+          stopGameLoop();
           setPhase('result');
           return 0;
         }
@@ -156,81 +158,129 @@ export default function GameCatchScreen({ navigation }) {
     return () => clearTimeout(t);
   }, [phase]);
 
-  // ── PanResponder — drag pet left/right ───────────────────────────
-  const panResponder = useRef(PanResponder.create({
+  // ── PanResponder — relative delta movement ───────────────────────
+  // Uses gs.dx (total accumulated delta) instead of moveX - x0.
+  // gs.dx is always in container-relative coordinates — works identically
+  // on web and mobile.
+  const dragStartPetX = useRef(0);
+  const panResponder  = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder:  () => true,
-    onPanResponderGrant: (_, gs) => {
-      dragStart.current = { petX: petXRef.current, touchX: gs.x0 };
+    onPanResponderGrant: () => {
+      dragStartPetX.current = petXRef.current;
     },
     onPanResponderMove: (_, gs) => {
-      const delta = gs.moveX - dragStart.current.touchX;
-      const maxX  = areaWidthRef.current - PET_HALF;
-      const newX  = Math.max(PET_HALF, Math.min(maxX, dragStart.current.petX + delta));
+      // gs.dx is the total translation from the grant point — purely relative,
+      // no absolute screen coordinate involved.
+      const W    = areaWidthRef.current || 300;
+      const newX = Math.max(PET_HALF, Math.min(W - PET_HALF, dragStartPetX.current + gs.dx));
       petXRef.current = newX;
-      petXAnim.setValue(newX - PET_HALF);  // left edge
+      petXAnim.setValue(newX - PET_HALF);
     },
   })).current;
 
-  // ── Game logic ───────────────────────────────────────────────────
+  // ── Game loop helpers ────────────────────────────────────────────
+  function stopGameLoop() {
+    if (gameLoopRef.current) {
+      clearInterval(gameLoopRef.current);
+      gameLoopRef.current = null;
+    }
+    foodFalling.current = false;
+  }
+
+  function startGameLoop() {
+    stopGameLoop();
+    foodFalling.current = true;
+    gameLoopRef.current = setInterval(gameTick, LOOP_MS);
+  }
+
+  // ── Core game tick — runs at ~60fps ──────────────────────────────
+  // This is the only place collision is checked, ensuring every frame
+  // is evaluated regardless of platform or bridge load.
+  function gameTick() {
+    if (!gameActive.current || !foodFalling.current) return;
+
+    // 1. Advance food position
+    foodYRef.current += foodSpeedRef.current;
+
+    // 2. Drive the Animated.Value from JS (no native driver timing running)
+    foodYAnim.setValue(foodYRef.current);
+
+    // 3. Debug re-render trigger
+    if (DEBUG_HITBOX) setDebugFrame(f => (f + 1) & 0xFFFF);
+
+    // 4. AABB collision detection
+    //    All coordinates are relative to the game area container.
+    const aH = areaHeightRef.current;
+    if (!aH) return;
+
+    const petMouthY = aH - MOUTH_Y_OFFSET; // mouth center Y from area top
+
+    // Mouth bounding box
+    const mL = petXRef.current  - MOUTH_HW;
+    const mR = petXRef.current  + MOUTH_HW;
+    const mT = petMouthY        - MOUTH_HH;
+    const mB = petMouthY        + MOUTH_HH;
+
+    // Food bounding box (top-left origin)
+    const fL = foodXRef.current;
+    const fR = fL + FOOD_SIZE;
+    const fT = foodYRef.current;
+    const fB = fT + FOOD_SIZE;
+
+    const hit = fR > mL && fL < mR && fB > mT && fT < mB;
+
+    if (hit) {
+      foodCaughtRef.current = true;
+      stopGameLoop();
+      onFoodCaught();
+      return;
+    }
+
+    // 5. Missed: food passed the bottom
+    if (foodYRef.current > aH + FOOD_SIZE) {
+      stopGameLoop();
+      if (!foodCaughtRef.current) onFoodMissed();
+    }
+  }
+
+  // ── Spawn food ───────────────────────────────────────────────────
   function spawnFood() {
     if (!gameActive.current) return;
-    if (!areaWidthRef.current) {
+    if (!areaWidthRef.current || !areaHeightRef.current) {
       setTimeout(() => spawnFood(), 200);
       return;
     }
+
     const x     = Math.max(8, Math.floor(Math.random() * (areaWidthRef.current - FOOD_SIZE - 8)));
     const emoji = FOODS[Math.floor(Math.random() * FOODS.length)];
+    const fallMs = Math.max(FALL_MIN_MS, FALL_BASE_MS - scoreRef.current * 55);
+    const totalDist = areaHeightRef.current + FOOD_SIZE * 2;
 
     foodXRef.current      = x;
+    foodYRef.current      = -FOOD_SIZE;
+    foodSpeedRef.current  = totalDist / (fallMs / LOOP_MS);
     foodCaughtRef.current = false;
+
+    // Sync Animated.Value before loop starts (avoids stale render)
     foodYAnim.setValue(-FOOD_SIZE);
-    foodYValRef.current   = -FOOD_SIZE;
+
     setFoodX(x);
     setFoodEmoji(emoji);
     setFoodActive(true);
 
-    const fallMs = Math.max(FALL_MIN_MS, FALL_BASE_MS - scoreRef.current * 55);
-    foodAnimRef.current = Animated.timing(foodYAnim, {
-      toValue: areaHeightRef.current + FOOD_SIZE,
-      duration: fallMs,
-      useNativeDriver: true,
-    });
-    foodAnimRef.current.start(({ finished }) => {
-      if (finished && !foodCaughtRef.current && gameActive.current) {
-        onFoodMissed();
-      }
-    });
-  }
-
-  function checkCollision(yVal) {
-    if (!areaHeightRef.current) return;
-    const petMouthY   = areaHeightRef.current - PET_BOTTOM_PAD - MOUTH_FROM_BOT;
-    const foodCenterY = yVal + FOOD_HALF;
-    const foodCenterX = foodXRef.current + FOOD_HALF;
-    const petCenterX  = petXRef.current;
-
-    if (
-      Math.abs(foodCenterY - petMouthY) < MOUTH_HH &&
-      Math.abs(foodCenterX - petCenterX) < MOUTH_HW
-    ) {
-      foodCaughtRef.current = true;
-      onFoodCaught();
-    }
+    startGameLoop();
   }
 
   function onFoodCaught() {
-    if (foodAnimRef.current) foodAnimRef.current.stop();
     setFoodActive(false);
     scoreRef.current += 1;
     setScore(s => s + 1);
-    // Open mouth animation
     setMouthOpen(true);
     setTimeout(() => setMouthOpen(false), 420);
-    // Feedback + global pet boosts
     showMsg('😋 Caught! +' + COINS_PER_CATCH + '🪙');
     triggerEat(5);
-    addGameHappiness(4);  // +4 happiness per catch
+    addGameHappiness(4);
     setTimeout(() => { if (gameActive.current) spawnFood(); }, 700);
   }
 
@@ -247,6 +297,7 @@ export default function GameCatchScreen({ navigation }) {
   }
 
   function startGame() {
+    stopGameLoop();
     scoreRef.current   = 0;
     coinsAdded.current = false;
     gameActive.current = true;
@@ -256,15 +307,20 @@ export default function GameCatchScreen({ navigation }) {
     setMouthOpen(false);
     setFoodActive(false);
     setCatchMsg(null);
-    // Center pet
     const cx = (areaWidthRef.current || 160);
-    petXRef.current = cx;
-    petXAnim.setValue(cx - PET_HALF);
+    petXRef.current = cx / 2;
+    petXAnim.setValue(cx / 2 - PET_HALF);
     setPhase('playing');
   }
 
   const coinsEarned = score * COINS_PER_CATCH;
   const timerColor  = timeLeft <= 5 ? '#e53935' : '#a07800';
+
+  // Debug hitbox positions (only used when DEBUG_HITBOX=true)
+  const dbgMouthL = petXRef.current  - MOUTH_HW;
+  const dbgMouthT = areaHeightRef.current > 0
+    ? areaHeightRef.current - MOUTH_Y_OFFSET - MOUTH_HH
+    : 0;
 
   return (
     <View style={styles.screen}>
@@ -273,7 +329,7 @@ export default function GameCatchScreen({ navigation }) {
         <TouchableOpacity
           onPress={() => {
             gameActive.current = false;
-            if (foodAnimRef.current) foodAnimRef.current.stop();
+            stopGameLoop();
             navigation.goBack();
           }}
           style={styles.backBtn}
@@ -346,7 +402,7 @@ export default function GameCatchScreen({ navigation }) {
             <Text style={styles.cloud1}>☁️</Text>
             <Text style={styles.cloud2}>☁️</Text>
 
-            {/* Falling food */}
+            {/* Falling food — position driven by JS game loop via setValue */}
             {foodActive && (
               <Animated.View
                 pointerEvents="none"
@@ -364,13 +420,39 @@ export default function GameCatchScreen({ navigation }) {
               <Text style={styles.grassEmoji}>🌿🌿🌿🌿🌿🌿🌿🌿🌿🌿</Text>
             </View>
 
-            {/* Pet — draggable, sits on ground */}
+            {/* Pet */}
             <Animated.View
               pointerEvents="none"
               style={[styles.petAnchor, { left: petXAnim }]}
             >
               <GamePet mouthOpen={mouthOpen} palette={petPalette} />
             </Animated.View>
+
+            {/* ── Debug hitboxes — set DEBUG_HITBOX=true to enable ── */}
+            {DEBUG_HITBOX && (
+              <>
+                {/* Mouth hitbox (red) */}
+                <View pointerEvents="none" style={{
+                  position: 'absolute',
+                  left:   dbgMouthL,
+                  top:    dbgMouthT,
+                  width:  MOUTH_HW * 2,
+                  height: MOUTH_HH * 2,
+                  borderWidth: 2, borderColor: 'red', opacity: 0.7,
+                }} />
+                {/* Food hitbox (blue) */}
+                {foodActive && (
+                  <View pointerEvents="none" style={{
+                    position: 'absolute',
+                    left:   foodXRef.current,
+                    top:    foodYRef.current,
+                    width:  FOOD_SIZE,
+                    height: FOOD_SIZE,
+                    borderWidth: 2, borderColor: 'blue', opacity: 0.7,
+                  }} />
+                )}
+              </>
+            )}
           </View>
         </View>
       )}
@@ -431,7 +513,6 @@ const styles = StyleSheet.create({
   },
   startBtnText: { color: '#fff', fontSize: 17, fontWeight: '900' },
 
-  // ── Play layout
   playArea: { flex: 1, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 14 },
 
   statsRow: {
@@ -451,7 +532,6 @@ const styles = StyleSheet.create({
   catchMsg: { fontSize: 17, fontWeight: '900' },
   dragHint: { fontSize: 13, color: '#bbb', fontWeight: '600', letterSpacing: 0.5 },
 
-  // ── Game area
   gameArea: {
     flex: 1,
     backgroundColor: '#d6eeff',
@@ -487,7 +567,6 @@ const styles = StyleSheet.create({
     width: PET_SIZE,
   },
 
-  // ── Result
   resultEmoji:     { fontSize: 72 },
   resultTitle:     { fontSize: 24, fontWeight: '900', color: '#a07800' },
   resultStat:      { fontSize: 15, color: '#555' },

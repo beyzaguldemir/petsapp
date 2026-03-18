@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PetProvider } from './context/PetContext';
 import HomeScreen       from './screens/HomeScreen';
@@ -40,84 +41,94 @@ function TabIcon({ emoji, focused }) {
   );
 }
 
+function AppNavigator() {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <NavigationContainer>
+      <StatusBar style="dark" />
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: '#ffffff',
+            borderTopWidth: 0,
+            elevation: 12,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -3 },
+            shadowOpacity: 0.08,
+            shadowRadius: 10,
+            height: 64 + insets.bottom,
+            paddingBottom: 8 + insets.bottom,
+            paddingTop: 6,
+          },
+          tabBarActiveTintColor: '#7c5cbf',
+          tabBarInactiveTintColor: '#aaa',
+          tabBarLabelStyle: {
+            fontSize: 12,
+            fontWeight: '700',
+          },
+        }}
+      >
+        <Tab.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{
+            tabBarLabel: 'Home',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Feed"
+          component={FeedScreen}
+          options={{
+            tabBarLabel: 'Feed',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🍔" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Play"
+          component={PlayNavigator}
+          options={{
+            tabBarLabel: 'Play',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🎮" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Bath"
+          component={BathScreen}
+          options={{
+            tabBarLabel: 'Bath',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🛁" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Sleep"
+          component={SleepScreen}
+          options={{
+            tabBarLabel: 'Sleep',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🌙" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Shop"
+          component={ShopScreen}
+          options={{
+            tabBarLabel: 'Shop',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🛍️" focused={focused} />,
+          }}
+        />
+      </Tab.Navigator>
+    </NavigationContainer>
+  );
+}
+
 export default function App() {
   return (
-    <PetProvider>
-      <NavigationContainer>
-        <StatusBar style="dark" />
-        <Tab.Navigator
-          screenOptions={{
-            headerShown: false,
-            tabBarStyle: {
-              backgroundColor: '#ffffff',
-              borderTopWidth: 0,
-              elevation: 12,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: -3 },
-              shadowOpacity: 0.08,
-              shadowRadius: 10,
-              height: 64,
-              paddingBottom: 8,
-              paddingTop: 6,
-            },
-            tabBarActiveTintColor: '#7c5cbf',
-            tabBarInactiveTintColor: '#aaa',
-            tabBarLabelStyle: {
-              fontSize: 12,
-              fontWeight: '700',
-            },
-          }}
-        >
-          <Tab.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{
-              tabBarLabel: 'Home',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
-            }}
-          />
-          <Tab.Screen
-            name="Feed"
-            component={FeedScreen}
-            options={{
-              tabBarLabel: 'Feed',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🍔" focused={focused} />,
-            }}
-          />
-          <Tab.Screen
-            name="Play"
-            component={PlayNavigator}
-            options={{
-              tabBarLabel: 'Play',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🎮" focused={focused} />,
-            }}
-          />
-          <Tab.Screen
-            name="Bath"
-            component={BathScreen}
-            options={{
-              tabBarLabel: 'Bath',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🛁" focused={focused} />,
-            }}
-          />
-          <Tab.Screen
-            name="Sleep"
-            component={SleepScreen}
-            options={{
-              tabBarLabel: 'Sleep',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🌙" focused={focused} />,
-            }}
-          />
-          <Tab.Screen
-            name="Shop"
-            component={ShopScreen}
-            options={{
-              tabBarLabel: 'Shop',
-              tabBarIcon: ({ focused }) => <TabIcon emoji="🛍️" focused={focused} />,
-            }}
-          />
-        </Tab.Navigator>
-      </NavigationContainer>
-    </PetProvider>
+    <SafeAreaProvider>
+      <PetProvider>
+        <AppNavigator />
+      </PetProvider>
+    </SafeAreaProvider>
   );
 }

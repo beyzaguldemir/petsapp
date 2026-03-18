@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePet, LEVEL_THRESHOLDS } from '../context/PetContext';
 
 const STATS = [
@@ -12,6 +13,7 @@ const MAX_LEVEL = 7;
 
 export default function PetStatusBar() {
   const { coins, totalCoins, level, hunger, happiness, energy } = usePet();
+  const insets = useSafeAreaInsets();
   const vals = { hunger, happiness, energy };
 
   // LEVEL_THRESHOLDS[n] = coins needed to reach level n; next level = level+1
@@ -21,7 +23,7 @@ export default function PetStatusBar() {
     : 1;
 
   return (
-    <View style={styles.topBar}>
+    <View style={[styles.topBar, { marginTop: insets.top + 8 }]}>
 
       {/* ── Left: Coin + Level ──────────────────────── */}
       <View style={styles.leftGroup}>
@@ -62,7 +64,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    marginTop: 40,
     marginBottom: 4,
     alignSelf: 'stretch',
   },
